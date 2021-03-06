@@ -3,7 +3,7 @@
 This is a repository containing Kerbal Operating System files which will allow the user to fly Starship from Launch - Landing automatically.
 *The code is licensed under GNUGPL3, please respect this and credit me and the respective contributers! (or just this github)*
 
-You can change some of the variables within the program, these can be found near the top, however everything may need tweaking to suit your current setup.
+You can change some of the variables within the program, these can be found in the Init function, however everything may need tweaking to suit your current setup.
 
 ***
 
