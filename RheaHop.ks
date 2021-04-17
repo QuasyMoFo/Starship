@@ -11,14 +11,15 @@ init().
 function init {
     // Flight Parameters
     set tApogee to 10000.
-    set starshipHeight to 20.74.
-    set terminalCount to 10.
+    set staticFire to false.
+    set starshipHeight to 20.73.
+    set terminalCount to 5.
 
     // Vehicle Control
     set steeringManager:maxstoppingtime to 0.5.
     set steeringManager:rollts to 20.
     //lock trueApoapsis to ship:apoapsis - starshipHeight.
-    set g to constant:g * body:mass / body:radius^2.
+    lock g to body:mu / (body:radius + altitude) ^ 2.
     lock trueRadar to alt:radar - starshipHeight.
     lock p to 90 - vAng(ship:facing:vector, ship:up:vector).
     set aftFin1 to ship:partstagged("aftFin1")[0].
@@ -31,50 +32,75 @@ function init {
     set errorScaling to 1.
     set done to false.
     
+    set config:ipaddress to "25.106.23.51".
+    set config:telnet to true.
+    set config:ipu to 800.
+
+    set vent1 to ship:partstagged("vent")[0].
+    set vent2 to ship:partstagged("vent2")[0].
+    set vent3 to ship:partstagged("vent3")[0].
+
     // Engine Control
     set leewardEngine to ship:partstagged("eng3")[0].
     set sideEngine1 to ship:partstagged("eng1")[0].
     set sideEngine2 to ship:partstagged("eng2")[0].
 
+    // set leewardPivot to ship:partstagged("leewardpiv")[0].
+    // set eng1Pivot to ship:partstagged("eng1piv")[0].
+    // set eng2Pivot to ship:partstagged("eng2piv")[0].
+
     // Landing Pad
-    set landingZone to latlng(-8.8548168830479, -83.5023510574945).
+    set landingZone to latlng(5.66597063074963, 78.6971062340695).
     // lock latDiff to (landingZone:lat - addons:tr:impactpos:lat).
-
-
-    // Throttle Control
-    set throt to 0.
-    lock throttle to throt.
 
     // Setup
     if tApogee = 10000 {
-        set sideEngineShutdown1 to 4000.
-        set sideEngineShutdown2 to 6250.
+        set sideEngineShutdown1 to 5750. 
+        set sideEngineShutdown2 to 8250.
+    } else if tApogee = 15000 {
+        set sideEngineShutdown1 to 7500.
+        set sideEngineShutdown2 to 9500. 
     } else if tApogee = 20000 {
-        set sideEngineShutdown1 to 12500.
-        set sideEngineShutdown2 to 15000. 
+        set sideEngineShutdown1 to 9500.
+        set sideEngineShutdown2 to 16000.
+    } else if tApogee = 50000 {
+        set sideEngineShutdown1 to 20000.
+        set sideEngineShutdown2 to 35000.
     }
-
 
     // Countdown
     on ag9 {
         ag9 off.
         ag10 off.
-        set throt to 0.
+        lock throttle to 0.
+        leewardEngine:shutdown.
+        sideEngine1:shutdown.
+        sideEngine2:shutdown.
         wait 0.1.
         reboot.
     }
-    launchCountdown().
+
+    if staticFire = true {
+        staticFireSeq().
+    } else {
+        launchCountdown().
+    }
 }
 
 
 // FLIGHT SOFTWARE -----------------------------------------------------------------------------------
 function liftoff {
-    stage.
-    set throt to 1.05 * ship:mass * g / ship:availablethrust.
+    leewardEngine:activate.
+    lock throttle to 1.1 * ship:mass * g / ship:availablethrust.
+    wait 0.1.
+    sideEngine1:activate.
+    wait 0.3.
+    sideEngine2:activate.
     set initFace to facing.
     lock steering to initFace.
 
-    wait 3.
+    stage.
+    wait 1.
     stage.
 
     wait until ship:altitude > 100.
@@ -82,31 +108,34 @@ function liftoff {
 }
 
 function ascent {
-    lock steering to heading(landingZone:heading, 90 + 1 * (ship:altitude / 9000)).
+    lock steering to heading(landingZone:heading, 90 + 2 * (ship:altitude / 7000)).
 
     // Engine Cutoff 1
     wait until trueRadar > sideEngineShutdown1.
     toggle ag1.
     sideEngine1:shutdown.
+    lock throttle to 1.175 * ship:mass * g / ship:availablethrust.
 
     // Engine Cutoff 2
     wait until trueRadar > sideEngineShutdown2.
     toggle ag2.
     sideEngine2:shutdown.
     steeringManager:resettodefault().
+    lock throttle to 1.25 * ship:mass * g / ship:availablethrust.
 
     // Apogee + Bellyflop
-    wait until trueRadar > tApogee - 600.
-    engineSpool(0.1).
+    wait until apoapsis > tApogee + 50.
+    lock throttle to 0.1.
+    toggle ag6.
     set steeringManager:maxstoppingtime to 0.75.
     
-    wait until ship:apoapsis > tApogee.
-    wait 1.
+    wait until ship:apoapsis > tApogee - 150.
+    wait 3.
     lock steering to heading(landingZone:heading, 0).
     //set headerTankLfTXFER:active to true.
     //set headerTankLoxTXFER:active to true.
     wait until ship:verticalspeed < 0.
-    engineSpool(0).
+    lock throttle to 0.
     leewardEngine:shutdown.
 
     wait 1.
@@ -121,28 +150,36 @@ function controlledDescent {
     lock stopDist to ship:verticalspeed ^ 2 / (2 * maxDecel).
     lock impactTime to trueRadar / abs(ship:verticalspeed).
 
-    set lngErrorMulti to 175.
-
+    if lngError() > 0 {
+        //set latErrorMulti to -25.
+        set lngErrorMulti to -175.
+    } else {
+        //set latErrorMulti to 25.
+        set lngErrorMulti to 175.
+    }
+    
     //lock descentHeading to 270 + (latError * 500).
 
     //lock latCorrection to (latError() * latErrorMulti).
     lock lngCorrection to (lngError() * lngErrorMulti).
 
-    rcs on.
-    toggle ag6.
     wait 3.
     toggle ag5.
     wait 4.
 
     when trueRadar < tApogee then {
-        //lock latCorrection to (latError() * latErrorMulti * 3).
-        lock lngCorrection to (lngError() * lngErrorMulti * 4).
+        //lock latCorrection to (latError() * latErrorMulti).
+        lock lngCorrection to (lngError() * lngErrorMulti * 2).
+        preserve.
     }
 
     when trueRadar < 3500 then {
-        //lock latCorrection to (latError() * latErrorMulti * 4.5).
-        lock lngCorrection to (lngError() * lngErrorMulti * 8).
+        //lock latCorrection to (latError() * latErrorMulti * 2.8).
+        lock lngCorrection to (lngError() * lngErrorMulti * 5).
+        preserve.
+    }
 
+    when trueRadar < 2000 then {
         sideEngine1:activate.
         set sideEngine1:thrustlimit to 100.
         sideEngine2:activate.
@@ -153,11 +190,17 @@ function controlledDescent {
     }
 
     lock steering to heading(landingZone:heading, (0 + lngCorrection)).
+    set steeringManager:maxstoppingtime to 5.
 
     until (stopDist + 300) > trueRadar {
         wait 0.
     }
 
+    leewardEngine:shutdown.
+    sideEngine1:shutdown.
+    sideEngine2:shutdown.
+
+    rcs on.
     steeringManager:resettodefault().
  
     landing().
@@ -166,60 +209,74 @@ function controlledDescent {
 function landing {
     lock idealThrottle to stopDist / trueRadar.
     when impactTime < 3 then {gear on.}
-    when impactTime < 1.5  then {lock finalFace to facing. lock steering to finalFace.}
+    when impactTime < 0.75 then {set cf to facing. lock steering to cf.}
 
-    lock throttle to (idealThrottle + 0.4).
+    toggle ag7.
+    sideEngine1:activate.
+    wait 0.1.
+    lock throttle to (idealThrottle + 0.1).
+    leewardEngine:activate.
     wait 0.2.
-    set ship:control:pitch to 10.
+    sideEngine2:activate.
     toggle ag5.
-    aftFin1:getmodule("ModuleControlSurface"):setfield("Deploy Angle", -65).
-    aftFin2:getmodule("ModuleControlSurface"):setfield("Deploy Angle", -65).
-    wait until p > 75.
+    set ship:control:pitch to 5.
+    aftFin1:getmodule("ModuleControlSurface"):setfield("Deploy Angle", -70).
+    aftFin2:getmodule("ModuleControlSurface"):setfield("Deploy Angle", -70).
+    until p > 65 {
+        wait 0.
+    }
+    aftFin1:getmodule("ModuleControlSurface"):setfield("Deploy Angle", -60).
+    aftFin2:getmodule("ModuleControlSurface"):setfield("Deploy Angle", -60).
     set ship:control:neutralize to true.
-    set aoa to -7.
-    set steeringManager:maxstoppingtime to 0.75.
     lock steering to getSteering().
-    wait until ship:verticalspeed > -42.5.
-    leewardEngine:shutdown.
+    set aoa to -4.
     wait 1.
+    toggle ag7.
+    lock throttle to (idealThrottle + 0.425).
+    if ship:verticalspeed > -5 {
+        lock throttle to (idealThrottle + 0.3).
+    }
+    set steeringManager:maxstoppingtime to 0.25.
     toggle ag5.
-    toggle ag1.
-    lock throttle to (idealThrottle + 0.2).
+    set aoa to -0.75.
     toggle ag2.
-
-    wait until ship:verticalspeed > -30.
-    set aoa to -0.5.
-    toggle ag2.
-
-    wait until ship:verticalspeed > -12.5.
-    //sideEngine2:shutdown.
-    lock landAng to facing.
-    lock steering to landAng.
+    if alt:radar < starshipHeight + 30 {
+        lock throttle to (idealThrottle + 0.2).
+        set aoa to -0.25.
+    }
 
     wait until ship:verticalspeed > -0.01.
     lock throttle to 0.
-    set done to true.
-    wait 1.
-    toggle ag5.
-    toggle ag6.
     wait 10.
     rcs off.
+    set done to true.
     shutdown.
 }
 
 
 // FUNCTIONS -----------------------------------------------------------------------------------------
 function launchCountdown {
-    until terminalCount = 1 {
+    until terminalCount = 0 {
         clearscreen.
+        print "Rhea Countdown".
         print "T-" + terminalCount.
         wait 1.
         set terminalCount to terminalCount - 1.
+
+        if terminalCount = 55 {
+            vent1:getmodule("MakeSteam"):doaction("toggle vapor vent", true).
+            vent2:getmodule("MakeSteam"):doaction("toggle vapor vent", true).
+            vent3:getmodule("MakeSteam"):doaction("toggle vapor vent", true).
+        }
 
         if ag9 {
             ag9 off.
             ag10 off.
             lock throttle to 0.
+
+            vent1:getmodule("MakeSteam"):doaction("toggle vapor vent", true).
+            vent2:getmodule("MakeSteam"):doaction("toggle vapor vent", true).
+            vent3:getmodule("MakeSteam"):doaction("toggle vapor vent", true).
             
             wait 0.1.
             reboot.
@@ -227,16 +284,40 @@ function launchCountdown {
     }
 
     when done = false then {
+        clearscreen.
+
+        print "Rhea Vehicle Telemetry".
+        print "----------------------".
+        print "Status: " + ship:status.
+        print "IsDead: " + ship:isdead.
+        print "MET: " + round(missionTime, 1).
+        print "----------------------".
+        print "Alt (M): " + round(alt:radar, 3).
+        print "Apo (M): " + round(ship:apoapsis, 3).
+        print "VSpd (M/S): " + round(ship:verticalspeed, 3).
+        print "Throttle: " + round(throttle, 3). 
+        print "Pitch (Deg): " + round(p, 3).
+        print "----------------------".
+        print "Lqd Methane (U): " + round(ship:lqdmethane, 3).
+        print "Lqd Oxygen (U): " + round(ship:oxidizer, 3).
+        print "Mass (T): " + round(ship:mass, 3).   
+        print "----------------------". 
+        print "Engine 1: " + sideEngine1:ignition.
+        print "Engine 2: " + sideEngine2:ignition.
+        print "Engine 3: " + leewardEngine:ignition.
+        print "Eng 1 Fuel Flow: " + round(sideEngine1:fuelflow, 3).
+        print "Eng 2 Fuel Flow: " + round(sideEngine2:fuelflow, 3).
+        print "Eng 3 Fuel Flow: " + round(leewardEngine:fuelflow, 3).
+
         switch to 0.
-        log "Alt (M): " + round(alt:radar, 1) to altradar.txt.
-        log "Spd (M/S): " + round(verticalSpeed, 1) to vertspeed.txt.
+        //log "MET: " + round(missionTime) + " | " + "Alt: " + round(altitude, 1) + " | " + "Apo: " + round(apoapsis, 1) + " | " + "Throt: " + round(throttle, 3) + " | " + "VSpd: " + round(verticalSpeed, 3) + " | " + "Pitch: " + round(p, 3) + " | " + "Methane: " + round(ship:lqdmethane, 1) + " | " + "Oxid: " + round(ship:oxidizer, 1) to rhea_Flight_Data.csv.
 
         if ag4 {
             log "FTS SYSTEM ENGAGED" to altradar.txt.
             log "FTS SYSTEM ENGAGED" to vertspeed.txt.
         }
 
-        wait 0.2.
+        wait 0.05.
         preserve.
     }
 
@@ -244,36 +325,26 @@ function launchCountdown {
 
 }
 
-function engineSpool {
-    parameter tgt, ullage is false.
-    local startTime is time:seconds.
-    local throttleStep is 0.0111111.
+function staticFireSeq {
+    wait 5.
+    lock throttle to 1.
+    leewardEngine:activate.
+    wait 0.1.
+    sideEngine1:activate.
+    wait 0.2.
+    sideEngine2:activate.
 
-    if (ullage) {
-        rcs on.
-        set ship:control:fore to 0.5.
+    wait 3.
 
-        when (time:seconds > startTime + 2) then {
-            set ship:control:neutralize to true.
-            rcs off.
-        }
-    }
-
-    if (throt < tgt) {
-        if (ullage) {
-            set throt to 0.025. 
-            wait 0.5.
-        }
-        until throttle >= tgt {
-            set throt to throt + throttleStep.
-        } 
-    } else {
-        until throttle <= tgt {
-            set throt to throt - throttleStep.
-        }
-    }
-
-    set throt to tgt.
+    sideEngine1:shutdown.
+    wait 0.2.
+    leewardEngine:shutdown.
+    wait 0.05.
+    sideEngine2:shutdown.
+    lock throttle to 0.
+    
+    ag10 off.
+    reboot.
 }
 
 function getImpact {
